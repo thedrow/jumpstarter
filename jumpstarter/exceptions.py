@@ -1,0 +1,2 @@
+class NotAResourceError(TypeError):
+    pass
