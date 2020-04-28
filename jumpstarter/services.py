@@ -289,7 +289,7 @@ class Service(HierarchicalAsyncMachine):
 
     @class_story
     def acquire_resources(cls, I):
-        for attribute_name, attribute in cls.__dict__.copy().items():
+        for attribute_name, attribute in __class__.__dict__.copy().items():
             if attribute_name == "acquire_resources":
                 continue
             attribute = getattr(cls, attribute_name)
@@ -306,22 +306,19 @@ class Service(HierarchicalAsyncMachine):
     cancel_scope.__resource__ = True
     cancel_scope.__timeout__ = None
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(declaring_class, **kwargs):
         @class_story
-        def acquire_resources(cls, I):
-            # TODO: Figure out how to call super() instead
+        def acquire_resources(bound_class, I):
+            super(declaring_class, bound_class).acquire_resources(I)
 
-            for attribute_name in dir(cls):
-                if attribute_name == "acquire_resources":
-                    continue
-                attribute = getattr(cls, attribute_name)
+            for attribute_name, attribute in bound_class.__dict__.copy().items():
                 if (
                         hasattr(attribute, "__resource__")
                         and attribute.__resource__
                 ):
-                    resource_acquirer = cls.create_resource_acquirer(attribute)
+                    resource_acquirer = bound_class.create_resource_acquirer(attribute)
                     getattr(I, resource_acquirer)
 
-        cls.acquire_resources = acquire_resources
+        declaring_class.acquire_resources = acquire_resources
 
 
