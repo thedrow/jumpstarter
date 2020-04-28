@@ -164,6 +164,19 @@ class Service(HierarchicalAsyncMachine):
     # STEPS #
     #########
 
+    @class_story
+    def acquire_resources(cls, I):
+        for attribute_name, attribute in __class__.__dict__.copy().items():
+            if attribute_name == "acquire_resources":
+                continue
+            attribute = getattr(cls, attribute_name)
+            if (
+                    hasattr(attribute, "__resource__")
+                    and attribute.__resource__
+            ):
+                resource_acquirer = cls.create_resource_acquirer(attribute)
+                getattr(I, resource_acquirer)
+
     async def release_resources(self, ctx):
         await self._exit_stack.aclose()
 
@@ -220,6 +233,16 @@ class Service(HierarchicalAsyncMachine):
 
         return Success()
 
+    #############
+    # RESOURCES #
+    #############
+
+    def cancel_scope(self, ctx):
+        return self._cancel_scope
+
+    cancel_scope.__resource__ = True
+    cancel_scope.__timeout__ = None
+
     ####################################
     # INTERNAL STATE MACHINE CALLBACKS #
     ####################################
@@ -227,25 +250,9 @@ class Service(HierarchicalAsyncMachine):
     def _increase_restart_count(self):
         self._restart_count += 1
 
-    ###################
-    # SPECIAL METHODS #
-    ###################
-
-    def __getattr__(self, item):
-        # TODO: Remove this workaround once https://github.com/pytransitions/transitions/pull/422 is merged
-        callback_type, target = self._identify_callback(item)
-
-        if callback_type is not None:
-            if callback_type in self.transition_cls.dynamic_methods:
-                if target not in self.events:
-                    raise AttributeError("event '{}' is not registered on <Machine@{}>"
-                                         .format(target, id(self)))
-                return functools.partial(self.events[target].add_callback, callback_type)
-
-            elif callback_type in self.state_cls.dynamic_methods:
-                state = self.get_state(target)
-                return functools.partial(state.add_callback, callback_type[3:])
-        return self.__getattribute__(item)
+    ##################
+    # STEP FACTORIES #
+    ##################
 
     @classmethod
     def create_resource_acquirer(cls, resource) -> str:
@@ -287,24 +294,25 @@ class Service(HierarchicalAsyncMachine):
         setattr(cls, wrapper.__name__, wrapper)
         return f"acquire_{resource_name}"
 
-    @class_story
-    def acquire_resources(cls, I):
-        for attribute_name, attribute in __class__.__dict__.copy().items():
-            if attribute_name == "acquire_resources":
-                continue
-            attribute = getattr(cls, attribute_name)
-            if (
-                    hasattr(attribute, "__resource__")
-                    and attribute.__resource__
-            ):
-                resource_acquirer = cls.create_resource_acquirer(attribute)
-                getattr(I, resource_acquirer)
+    ###################
+    # SPECIAL METHODS #
+    ###################
 
-    def cancel_scope(self, ctx):
-        return self._cancel_scope
+    def __getattr__(self, item):
+        # TODO: Remove this workaround once https://github.com/pytransitions/transitions/pull/422 is merged
+        callback_type, target = self._identify_callback(item)
 
-    cancel_scope.__resource__ = True
-    cancel_scope.__timeout__ = None
+        if callback_type is not None:
+            if callback_type in self.transition_cls.dynamic_methods:
+                if target not in self.events:
+                    raise AttributeError("event '{}' is not registered on <Machine@{}>"
+                                         .format(target, id(self)))
+                return functools.partial(self.events[target].add_callback, callback_type)
+
+            elif callback_type in self.state_cls.dynamic_methods:
+                state = self.get_state(target)
+                return functools.partial(state.add_callback, callback_type[3:])
+        return self.__getattribute__(item)
 
     def __init_subclass__(declaring_class, **kwargs):
         @class_story
