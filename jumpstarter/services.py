@@ -64,12 +64,19 @@ class Service(HierarchicalAsyncMachine):
         self._restart_count: int = 0
         self._cancel_scope: anyio.CancelScope = anyio.open_cancel_scope()
         self._exit_stack: AsyncExitStack = AsyncExitStack()
+        self._started_event: anyio.Event = anyio.create_event()
 
         self.on_enter_restarting(self._increase_restart_count)
+        self.on_enter_started(self._notify_started)
+        self.on_enter_stopping(self._reset_started_event)
 
     ##############
     # PUBLIC API #
     ##############
+
+    @property
+    def started_event(self):
+        return self._started_event
 
     @story
     @arguments("task_group")
@@ -250,6 +257,12 @@ class Service(HierarchicalAsyncMachine):
 
     def _increase_restart_count(self):
         self._restart_count += 1
+
+    async def _notify_started(self):
+        await self._started_event.set()
+
+    def _reset_started_event(self):
+        self.started_event.clear()
 
     ##################
     # STEP FACTORIES #
