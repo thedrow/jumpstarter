@@ -66,6 +66,7 @@ class Service(HierarchicalAsyncMachine):
         self._exit_stack: AsyncExitStack = AsyncExitStack()
         self._started_event: anyio.Event = anyio.create_event()
         self._shutdown_event: anyio.Event = anyio.create_event()
+        self._dependencies = []
 
         self.on_enter_restarting(self._increase_restart_count)
         self.on_enter_started(self._notify_started)
@@ -76,6 +77,9 @@ class Service(HierarchicalAsyncMachine):
     ##############
     # PUBLIC API #
     ##############
+
+    def register_dependency(self, service):
+        self._dependencies.append(service)
 
     @property
     def started_event(self) -> anyio.Event:
@@ -116,6 +120,7 @@ class Service(HierarchicalAsyncMachine):
     @class_story
     def on_start(cls, I):
         I.change_state_to_starting
+        I.wait_for_dependencies_to_start
         I.acquire_resources
         I.schedule_background_tasks
 
@@ -126,6 +131,7 @@ class Service(HierarchicalAsyncMachine):
     @class_story
     def on_stop(cls, I):
         I.change_state_to_stopping
+        I.wait_for_dependencies_to_shutdown
         I.release_resources
 
     @class_story
@@ -162,6 +168,26 @@ class Service(HierarchicalAsyncMachine):
     #########
     # STEPS #
     #########
+
+    async def wait_for_dependencies_to_start(self, ctx):
+        if not self._dependencies:
+            return Success()
+
+        async with anyio.create_task_group() as tg:
+            for dependency in self._dependencies:
+                await tg.spawn(dependency.started_event.wait)
+
+        return Success()
+
+    async def wait_for_dependencies_to_shutdown(self, ctx):
+        if not self._dependencies:
+            return Success()
+
+        async with anyio.create_task_group() as tg:
+            for dependency in self._dependencies:
+                await tg.spawn(dependency.shutdown_event.wait)
+
+        return Success()
 
     @class_story
     def acquire_resources(cls, I):

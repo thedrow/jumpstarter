@@ -226,7 +226,7 @@ def example_acquiring_resources_service(mock_async_context_manager):
 
 @pytest.mark.anyio
 async def test_acquire_resources(
-    example_acquiring_resources_service, mock_async_context_manager, mock_schedule_background_tasks
+        example_acquiring_resources_service, mock_async_context_manager, mock_schedule_background_tasks
 ):
     service = example_acquiring_resources_service()
     service.schedule_background_tasks = mock_schedule_background_tasks
@@ -252,7 +252,7 @@ def example_service_acquiring_not_a_resource():
 
 @pytest.mark.anyio
 async def test_attempt_to_acquire_an_object_which_is_not_a_context_manager_raises_an_error(
-    example_service_acquiring_not_a_resource, mock_schedule_background_tasks
+        example_service_acquiring_not_a_resource, mock_schedule_background_tasks
 ):
     service = example_service_acquiring_not_a_resource()
     service.schedule_background_tasks = mock_schedule_background_tasks
@@ -280,7 +280,7 @@ def example_resource_acquiring_service_which_times_out():
 
 @pytest.mark.anyio
 async def test_acquire_resource_with_timeout(
-    example_resource_acquiring_service_which_times_out, mock_schedule_background_tasks
+        example_resource_acquiring_service_which_times_out, mock_schedule_background_tasks
 ):
     service = example_resource_acquiring_service_which_times_out()
     service.schedule_background_tasks = mock_schedule_background_tasks
@@ -317,3 +317,36 @@ async def test_acquire_resources_with_inheritance(mock_async_context_manager, mo
     await service.stop()
 
     mock_async_context_manager.__aexit__.assert_awaited_once_with(mock_async_context_manager, None, None, None)
+
+
+@pytest.mark.anyio
+@pytest.mark.timeout(1)
+async def test_service_with_dependencies(mock_schedule_background_tasks):
+    """Service must wait for dependencies to start before starting itself and stop before stopping itself"""
+    service1 = Service()
+    service1.schedule_background_tasks = mock_schedule_background_tasks
+    service2 = Service()
+    service2.schedule_background_tasks = mock_schedule_background_tasks
+    service3 = Service()
+    service3.schedule_background_tasks = mock_schedule_background_tasks
+
+    service3.register_dependency(service1)
+    service3.register_dependency(service2)
+
+    async with anyio.create_task_group() as tg:
+        await tg.spawn(functools.partial(service3.start, task_group=tg))
+        await tg.spawn(functools.partial(service2.start, task_group=tg))
+        await tg.spawn(functools.partial(service1.start, task_group=tg))
+
+    assert service3.is_started()
+    assert service2.is_started()
+    assert service1.is_started()
+
+    async with anyio.create_task_group() as tg:
+        await tg.spawn(service3.stop)
+        await tg.spawn(service2.stop)
+        await tg.spawn(service1.stop)
+
+    assert service3.is_stopped()
+    assert service2.is_stopped()
+    assert service1.is_stopped()
