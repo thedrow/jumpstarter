@@ -175,6 +175,7 @@ async def test_service_lifecycle(mock_schedule_background_tasks):
     assert service.is_started()
     assert states == [ServiceState.initialized, ServiceState.starting, ServiceState.started]
     assert service.started_event.is_set()
+    assert not service.shutdown_event.is_set()
 
     states.clear()
 
@@ -183,6 +184,7 @@ async def test_service_lifecycle(mock_schedule_background_tasks):
     assert service.is_stopped()
     assert states == [ServiceState.stopping, ServiceState.stopped]
     assert not service.started_event.is_set()
+    assert service.shutdown_event.is_set()
 
     states.clear()
 
@@ -204,6 +206,7 @@ async def test_service_lifecycle(mock_schedule_background_tasks):
         ServiceState.started,
     ]
     assert service.started_event.is_set()
+    assert not service.shutdown_event.is_set()
 
 
 @pytest.fixture()

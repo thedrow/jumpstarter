@@ -65,18 +65,25 @@ class Service(HierarchicalAsyncMachine):
         self._cancel_scope: anyio.CancelScope = anyio.open_cancel_scope()
         self._exit_stack: AsyncExitStack = AsyncExitStack()
         self._started_event: anyio.Event = anyio.create_event()
+        self._shutdown_event: anyio.Event = anyio.create_event()
 
         self.on_enter_restarting(self._increase_restart_count)
         self.on_enter_started(self._notify_started)
         self.on_enter_stopping(self._reset_started_event)
+        self.on_enter_starting(self._reset_shutdown_event)
+        self.on_enter_stopped(self._notify_shutdown)
 
     ##############
     # PUBLIC API #
     ##############
 
     @property
-    def started_event(self):
+    def started_event(self) -> anyio.Event:
         return self._started_event
+
+    @property
+    def shutdown_event(self) -> anyio.Event:
+        return self._shutdown_event
 
     @story
     @arguments("task_group")
@@ -261,8 +268,14 @@ class Service(HierarchicalAsyncMachine):
     async def _notify_started(self):
         await self._started_event.set()
 
+    async def _notify_shutdown(self):
+        await self._shutdown_event.set()
+
     def _reset_started_event(self):
         self.started_event.clear()
+
+    def _reset_shutdown_event(self):
+        self.shutdown_event.clear()
 
     ##################
     # STEP FACTORIES #
