@@ -7,6 +7,7 @@ from enum import Enum
 from enum import auto
 
 import anyio
+import math
 from _stories.exceptions import StoryDefinitionError
 from stories import class_story
 from stories import Failure
@@ -102,6 +103,7 @@ class Service(HierarchicalAsyncMachine):
     def on_start(cls, I):
         I.change_state_to_starting
         I.acquire_resources
+        I.schedule_background_tasks
 
     @class_story
     def on_started(cls, I):
@@ -126,29 +128,12 @@ class Service(HierarchicalAsyncMachine):
 
     @classmethod
     def background_task(cls, task: typing.Callable[[typing.Any, typing.Any], typing.Awaitable[None]]):
-        @functools.wraps(task)
-        async def wrapper(self, ctx):
-            async def task_runner():
-                while not self._cancel_scope.cancel_called:
-                    await task(self, ctx)
-
-                    # Let the scheduler decide if we should context switch
-                    # in case the whole task always blocks
-                    await anyio.sleep(0)
-
-            await ctx.task_group.spawn(task_runner, ctx)
-
-            return Success()
-
-        wrapper.__name__ = f"schedule_{task.__name__}"
-        wrapper.__background_task__ = True
+        task.__background_task__ = True
 
         return task
 
     @classmethod
-    def acquire_resource(
-            cls, resource=None, timeout: float = None
-    ):
+    def acquire_resource(cls, resource=None, timeout: float = None):
         def decorator(resource):
             resource.__resource__ = True
             resource.__timeout__ = timeout
@@ -169,13 +154,20 @@ class Service(HierarchicalAsyncMachine):
         for attribute_name, attribute in __class__.__dict__.copy().items():
             if attribute_name == "acquire_resources":
                 continue
-            attribute = getattr(cls, attribute_name)
-            if (
-                    hasattr(attribute, "__resource__")
-                    and attribute.__resource__
-            ):
+
+            if hasattr(attribute, "__resource__") and attribute.__resource__:
                 resource_acquirer = cls.create_resource_acquirer(attribute)
                 getattr(I, resource_acquirer)
+
+    @class_story
+    def schedule_background_tasks(cls, I):
+        for attribute_name, attribute in __class__.__dict__.copy().items():
+            if attribute_name == "schedule_background_tasks":
+                continue
+
+            if hasattr(attribute, "__background_task__") and attribute.__background_task__:
+                task_scheduler = cls.create_task_scheduler(attribute)
+                getattr(I, task_scheduler)
 
     async def release_resources(self, ctx):
         await self._exit_stack.aclose()
@@ -243,6 +235,15 @@ class Service(HierarchicalAsyncMachine):
     cancel_scope.__resource__ = True
     cancel_scope.__timeout__ = None
 
+    ####################
+    # BACKGROUND TASKS #
+    ####################
+
+    async def sleep_forever(self, ctx):
+        await anyio.sleep(math.inf)
+
+    sleep_forever.__background_task__ = True
+
     ####################################
     # INTERNAL STATE MACHINE CALLBACKS #
     ####################################
@@ -259,6 +260,7 @@ class Service(HierarchicalAsyncMachine):
         resource_name = resource.__name__
 
         if resource.__timeout__:
+
             @functools.wraps(resource)
             async def wrapper(self, ctx):
                 value_event = create_value_event()
@@ -274,7 +276,9 @@ class Service(HierarchicalAsyncMachine):
 
                 setattr(ctx, resource_name, value_event)
                 return Success()
+
         else:
+
             @functools.wraps(resource)
             async def wrapper(self, ctx):
                 value_event = create_value_event()
@@ -289,10 +293,32 @@ class Service(HierarchicalAsyncMachine):
 
                 setattr(ctx, resource_name, value_event)
                 return Success()
+
         wrapper.__name__ = f"acquire_{resource_name}"
         wrapper.__resource__ = False
         setattr(cls, wrapper.__name__, wrapper)
         return f"acquire_{resource_name}"
+
+    @classmethod
+    def create_task_scheduler(cls, task) -> str:
+        @functools.wraps(task)
+        async def wrapper(self, ctx):
+            async def task_runner():
+                while not self._cancel_scope.cancel_called:
+                    await task(self, ctx)
+
+                    # Let the scheduler decide if we should context switch
+                    # in case the whole task always blocks
+                    await anyio.sleep(0)
+
+            await ctx.task_group.spawn(task_runner)
+
+            return Success()
+
+        wrapper.__name__ = f"schedule_{task.__name__}"
+        wrapper.__background_task__ = False
+        setattr(cls, wrapper.__name__, wrapper)
+        return wrapper.__name__
 
     ###################
     # SPECIAL METHODS #
@@ -305,8 +331,7 @@ class Service(HierarchicalAsyncMachine):
         if callback_type is not None:
             if callback_type in self.transition_cls.dynamic_methods:
                 if target not in self.events:
-                    raise AttributeError("event '{}' is not registered on <Machine@{}>"
-                                         .format(target, id(self)))
+                    raise AttributeError("event '{}' is not registered on <Machine@{}>".format(target, id(self)))
                 return functools.partial(self.events[target].add_callback, callback_type)
 
             elif callback_type in self.state_cls.dynamic_methods:
@@ -320,13 +345,22 @@ class Service(HierarchicalAsyncMachine):
             super(declaring_class, bound_class).acquire_resources(I)
 
             for attribute_name, attribute in bound_class.__dict__.copy().items():
-                if (
-                        hasattr(attribute, "__resource__")
-                        and attribute.__resource__
-                ):
+                if hasattr(attribute, "__resource__") and attribute.__resource__:
                     resource_acquirer = bound_class.create_resource_acquirer(attribute)
                     getattr(I, resource_acquirer)
 
         declaring_class.acquire_resources = acquire_resources
 
+        @class_story
+        def schedule_background_tasks(bound_class, I):
+            super(declaring_class, bound_class).schedule_background_tasks(I)
 
+            for attribute_name, attribute in bound_class.__dict__.copy().items():
+                if attribute_name == "schedule_background_tasks":
+                    continue
+
+                if hasattr(attribute, "__background_task__") and attribute.__background_task__:
+                    task_scheduler = bound_class.create_task_scheduler(attribute)
+                    getattr(I, task_scheduler)
+
+        declaring_class.schedule_background_tasks = schedule_background_tasks

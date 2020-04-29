@@ -17,6 +17,7 @@ from jumpstarter.services import ServiceState
 
 @pytest.mark.anyio
 async def test_service_initial_state():
+    """The service state machine's initial state is ServiceState.initializing."""
     service = Service()
 
     assert service.is_initializing()
@@ -77,6 +78,7 @@ async def test_service_initial_state():
 )
 @pytest.mark.anyio
 async def test_service_state_machine_forbidden_transitions(initial_state, transition):
+    """The state machine cannot change state from {initial_state} using the {transition} transition."""
     machine = Service()
     machine.add_transition("travel", ServiceState.initializing, initial_state)
     await machine.travel()
@@ -113,6 +115,7 @@ async def test_service_state_machine_forbidden_transitions(initial_state, transi
 )
 @pytest.mark.anyio
 async def test_service_state_machine_allowed_transitions(initial_state, transition, final_state):
+    """The state machine can change state from {initial_state} using the {transition} transition to {final_state}"""
     machine = Service()
     machine.add_transition("travel", ServiceState.initializing, initial_state)
     await machine.travel()
@@ -125,10 +128,44 @@ async def test_service_state_machine_allowed_transitions(initial_state, transiti
     assert getattr(machine, f"is_{final_state}")()
 
 
+@pytest.fixture
+def mock_schedule_background_tasks():
+    mock = AsyncMock(return_value=Success())
+    mock.__name__ = "schedule_background_tasks"
+
+    return mock
+
+
 @pytest.mark.anyio
-async def test_service_transitions():
+async def test_service_lifecycle(mock_schedule_background_tasks):
+    """Service Lifecycle is as follows:
+    +----------------------+
+    |     Initializing     |
+    +----------------------+
+               ↓
+    +----------------------+
+    |      Initialized     |
+    +----------------------+
+               ↓
+    +----------------------+
+    |       Starting       |
+    +----------------------+
+               ↓
+    +----------------------+
+    |       Started        |
+    +----------------------+
+               ↓
+    +----------------------+
+    |       Stopping       |
+    +----------------------+
+               ↓
+    +----------------------+
+    |       Stopped        |
+    +----------------------+
+    """
     states = []
     service = Service()
+    service.schedule_background_tasks = mock_schedule_background_tasks
 
     service.after_state_change = lambda: states.append(service.state)
 
@@ -182,8 +219,11 @@ def example_acquiring_resources_service(mock_async_context_manager):
 
 
 @pytest.mark.anyio
-async def test_acquire_resources(example_acquiring_resources_service, mock_async_context_manager):
+async def test_acquire_resources(
+    example_acquiring_resources_service, mock_async_context_manager, mock_schedule_background_tasks
+):
     service = example_acquiring_resources_service()
+    service.schedule_background_tasks = mock_schedule_background_tasks
     async with anyio.create_task_group() as tg:
         await service.start(task_group=tg)
 
@@ -206,9 +246,10 @@ def example_service_acquiring_not_a_resource():
 
 @pytest.mark.anyio
 async def test_attempt_to_acquire_an_object_which_is_not_a_context_manager_raises_an_error(
-        example_service_acquiring_not_a_resource,
+    example_service_acquiring_not_a_resource, mock_schedule_background_tasks
 ):
     service = example_service_acquiring_not_a_resource()
+    service.schedule_background_tasks = mock_schedule_background_tasks
     with pytest.raises(NotAResourceError):
         async with anyio.create_task_group() as tg:
             await tg.spawn(functools.partial(service.start, task_group=tg))
@@ -232,8 +273,11 @@ def example_resource_acquiring_service_which_times_out():
 
 
 @pytest.mark.anyio
-async def test_acquire_resource_with_timeout(example_resource_acquiring_service_which_times_out):
+async def test_acquire_resource_with_timeout(
+    example_resource_acquiring_service_which_times_out, mock_schedule_background_tasks
+):
     service = example_resource_acquiring_service_which_times_out()
+    service.schedule_background_tasks = mock_schedule_background_tasks
 
     with pytest.raises(TimeoutError):
         async with anyio.create_task_group() as tg:
@@ -256,8 +300,9 @@ class ResourceAcquiringExtendedService(ResourceAcquiringService):
 
 
 @pytest.mark.anyio
-async def test_acquire_resources_with_inheritance(mock_async_context_manager):
+async def test_acquire_resources_with_inheritance(mock_async_context_manager, mock_schedule_background_tasks):
     service = ResourceAcquiringExtendedService(mock_async_context_manager)
+    service.schedule_background_tasks = mock_schedule_background_tasks
     async with anyio.create_task_group() as tg:
         await service.start(task_group=tg)
 
