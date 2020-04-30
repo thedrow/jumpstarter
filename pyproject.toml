@@ -5,7 +5,7 @@ description = "Program initialization toolkit"
 authors = ["Omer Katz <omer.drow@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.6"
+python = "^3.6.1"
 networkx = "^2.4"
 anyio = "^1.2.3"
 dependencies = "^1.0.0"
@@ -29,6 +29,7 @@ pytest-randomly = "^3.2.1"
 pytest-cov = "^2.8.1"
 pytest-timeout = "^1.3.4"
 termcolor = "^1.1.0"
+reorder_python_imports = "^2.2.0"
 
 [tool.black]
 line-length = 120
