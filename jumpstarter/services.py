@@ -1,25 +1,27 @@
 from __future__ import annotations
 
 import functools
+import math
 import typing
 from contextlib import AsyncExitStack
-from enum import Enum
 from enum import auto
-
-import anyio
-import math
-from _stories.exceptions import StoryDefinitionError
+from enum import Enum
+from stories import arguments
 from stories import class_story
 from stories import Failure
 from stories import Skip
-from stories import Success
-from stories import arguments
 from stories import story
+from stories import Success
+
+import anyio
 from transitions import MachineError
 from transitions.extensions.asyncio import HierarchicalAsyncMachine
 
 from jumpstarter.concurrency import create_value_event
 from jumpstarter.exceptions import NotAResourceError
+
+
+# region STATES
 
 
 class ServiceRestartState(Enum):
@@ -37,6 +39,9 @@ class ServiceState(Enum):
     stopping = auto()
     stopped = auto()
     crashed = auto()
+
+
+# endregion
 
 
 class Service(HierarchicalAsyncMachine):
@@ -74,9 +79,8 @@ class Service(HierarchicalAsyncMachine):
         self.on_enter_starting(self._reset_shutdown_event)
         self.on_enter_stopped(self._notify_shutdown)
 
-    ##############
-    # PUBLIC API #
-    ##############
+    # region PUBLIC API
+    ###################
 
     def register_dependency(self, service):
         self._dependencies.append(service)
@@ -108,9 +112,9 @@ class Service(HierarchicalAsyncMachine):
         I.stop
         I.start
 
-    #############
-    # CALLBACKS #
-    #############
+    # endregion
+    # region CALLBACKS
+    ##################
 
     @class_story
     def on_first_start(cls, I):
@@ -142,9 +146,9 @@ class Service(HierarchicalAsyncMachine):
     def on_restart(cls, I):
         I.change_state_to_restarting
 
-    #######
-    # DSL #
-    #######
+    # endregion
+    # region DSL
+    ############
 
     @classmethod
     def background_task(cls, task: typing.Callable[[typing.Any, typing.Any], typing.Awaitable[None]]):
@@ -165,9 +169,9 @@ class Service(HierarchicalAsyncMachine):
 
         return decorator
 
-    #########
-    # STEPS #
-    #########
+    # endregion
+    # region STEPS
+    ##############
 
     async def wait_for_dependencies_to_start(self, ctx):
         if not self._dependencies:
@@ -265,9 +269,9 @@ class Service(HierarchicalAsyncMachine):
 
         return Success()
 
-    #############
-    # RESOURCES #
-    #############
+    # endregion
+    # region RESOURCES
+    ##################
 
     def cancel_scope(self, ctx):
         return self._cancel_scope
@@ -275,18 +279,18 @@ class Service(HierarchicalAsyncMachine):
     cancel_scope.__resource__ = True
     cancel_scope.__timeout__ = None
 
-    ####################
-    # BACKGROUND TASKS #
-    ####################
+    # endregion
+    # region BACKGROUND TASKS
+    #########################
 
     async def sleep_forever(self, ctx):
         await anyio.sleep(math.inf)
 
     sleep_forever.__background_task__ = True
 
-    ####################################
-    # INTERNAL STATE MACHINE CALLBACKS #
-    ####################################
+    # endregion
+    # region INTERNAL STATE MACHINE CALLBACKS
+    #########################################
 
     def _increase_restart_count(self):
         self._restart_count += 1
@@ -303,9 +307,9 @@ class Service(HierarchicalAsyncMachine):
     def _reset_shutdown_event(self):
         self.shutdown_event.clear()
 
-    ##################
-    # STEP FACTORIES #
-    ##################
+    # endregion
+    # region STEP FACTORIES
+    #######################
 
     @classmethod
     def create_resource_acquirer(cls, resource) -> str:
@@ -372,9 +376,9 @@ class Service(HierarchicalAsyncMachine):
         setattr(cls, wrapper.__name__, wrapper)
         return wrapper.__name__
 
-    ###################
-    # SPECIAL METHODS #
-    ###################
+    # endregion
+    # region SPECIAL METHODS
+    ########################
 
     def __getattr__(self, item):
         # TODO: Remove this workaround once https://github.com/pytransitions/transitions/pull/422 is merged
@@ -416,3 +420,5 @@ class Service(HierarchicalAsyncMachine):
                     getattr(I, task_scheduler)
 
         declaring_class.schedule_background_tasks = schedule_background_tasks
+
+    # endregion

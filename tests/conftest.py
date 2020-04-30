@@ -1,6 +1,7 @@
 import textwrap
-import termcolor
+
 import pytest
+import termcolor
 from networkx import DiGraph
 from tests.mocks import MagicMock
 

@@ -1,12 +1,9 @@
 import functools
-from contextlib import asynccontextmanager
+from stories import Success
 from unittest.mock import AsyncMock
 
 import anyio
 import pytest
-from _stories.story import class_story
-from stories import story
-from stories import Success
 from transitions import MachineError
 
 from jumpstarter.exceptions import NotAResourceError
@@ -226,7 +223,7 @@ def example_acquiring_resources_service(mock_async_context_manager):
 
 @pytest.mark.anyio
 async def test_acquire_resources(
-        example_acquiring_resources_service, mock_async_context_manager, mock_schedule_background_tasks
+    example_acquiring_resources_service, mock_async_context_manager, mock_schedule_background_tasks
 ):
     service = example_acquiring_resources_service()
     service.schedule_background_tasks = mock_schedule_background_tasks
@@ -252,7 +249,7 @@ def example_service_acquiring_not_a_resource():
 
 @pytest.mark.anyio
 async def test_attempt_to_acquire_an_object_which_is_not_a_context_manager_raises_an_error(
-        example_service_acquiring_not_a_resource, mock_schedule_background_tasks
+    example_service_acquiring_not_a_resource, mock_schedule_background_tasks
 ):
     service = example_service_acquiring_not_a_resource()
     service.schedule_background_tasks = mock_schedule_background_tasks
@@ -280,7 +277,7 @@ def example_resource_acquiring_service_which_times_out():
 
 @pytest.mark.anyio
 async def test_acquire_resource_with_timeout(
-        example_resource_acquiring_service_which_times_out, mock_schedule_background_tasks
+    example_resource_acquiring_service_which_times_out, mock_schedule_background_tasks
 ):
     service = example_resource_acquiring_service_which_times_out()
     service.schedule_background_tasks = mock_schedule_background_tasks
