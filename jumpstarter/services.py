@@ -97,6 +97,7 @@ class Service(HierarchicalAsyncMachine):
     @arguments("task_group")
     def start(I):
         I.on_first_start
+        I.skip_if_started_or_wait_if_starting
         I.on_start
         I.on_started
 
@@ -212,6 +213,17 @@ class Service(HierarchicalAsyncMachine):
             if hasattr(attribute, "__background_task__") and attribute.__background_task__:
                 task_scheduler = cls.create_task_scheduler(attribute)
                 getattr(I, task_scheduler)
+
+    async def skip_if_started_or_wait_if_starting(self, ctx):
+        if self.is_started():
+            return Skip()
+
+        if self.is_starting() or self.is_restarting_starting():
+            await self._started_event.wait()
+
+            return Skip()
+
+        return Success()
 
     async def release_resources(self, ctx):
         await self._exit_stack.aclose()

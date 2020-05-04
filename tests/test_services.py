@@ -1,6 +1,6 @@
 import functools
 from stories import Success
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import anyio
 import pytest
@@ -223,7 +223,7 @@ def example_acquiring_resources_service(mock_async_context_manager):
 
 @pytest.mark.anyio
 async def test_acquire_resources(
-    example_acquiring_resources_service, mock_async_context_manager, mock_schedule_background_tasks
+        example_acquiring_resources_service, mock_async_context_manager, mock_schedule_background_tasks
 ):
     service = example_acquiring_resources_service()
     service.schedule_background_tasks = mock_schedule_background_tasks
@@ -249,7 +249,7 @@ def example_service_acquiring_not_a_resource():
 
 @pytest.mark.anyio
 async def test_attempt_to_acquire_an_object_which_is_not_a_context_manager_raises_an_error(
-    example_service_acquiring_not_a_resource, mock_schedule_background_tasks
+        example_service_acquiring_not_a_resource, mock_schedule_background_tasks
 ):
     service = example_service_acquiring_not_a_resource()
     service.schedule_background_tasks = mock_schedule_background_tasks
@@ -277,7 +277,7 @@ def example_resource_acquiring_service_which_times_out():
 
 @pytest.mark.anyio
 async def test_acquire_resource_with_timeout(
-    example_resource_acquiring_service_which_times_out, mock_schedule_background_tasks
+        example_resource_acquiring_service_which_times_out, mock_schedule_background_tasks
 ):
     service = example_resource_acquiring_service_which_times_out()
     service.schedule_background_tasks = mock_schedule_background_tasks
@@ -347,3 +347,44 @@ async def test_service_with_dependencies(mock_schedule_background_tasks):
     assert service3.is_stopped()
     assert service2.is_stopped()
     assert service1.is_stopped()
+
+
+@pytest.mark.anyio
+async def test_start_idempotency(mock_schedule_background_tasks):
+    started_counter = 0
+
+    def started_callback():
+        nonlocal started_counter
+        started_counter += 1
+
+    continue_event = anyio.create_event()
+
+    async def wait_for_continue():
+        await continue_event.wait()
+
+    started_event_mock = Mock(spec_set=anyio.Event)
+    service = Service()
+    service.on_enter_starting(wait_for_continue)
+    service.on_enter_started(started_callback)
+    service._started_event = started_event_mock
+    service.schedule_background_tasks = mock_schedule_background_tasks
+
+    result = None
+
+    async def start_while_in_progress():
+        nonlocal result
+        result = await service.start.run(task_group=tg)
+        await continue_event.set()
+
+    async with anyio.create_task_group() as tg:
+        await tg.spawn(functools.partial(service.start.run, task_group=tg))
+        await anyio.sleep(0.1)
+        await tg.spawn(start_while_in_progress)
+
+    started_event_mock.wait.assert_awaited_once_with()
+    assert result.is_success
+    assert started_counter == 1
+
+    result = await service.start.run(task_group=tg)
+    assert result.is_success
+    assert started_counter == 1
