@@ -103,6 +103,7 @@ class Service(HierarchicalAsyncMachine):
 
     @story
     def stop(I):
+        I.skip_if_stopped_or_wait_if_stopping
         I.on_stop
         I.on_shutdown
 
@@ -220,6 +221,17 @@ class Service(HierarchicalAsyncMachine):
 
         if self.is_starting() or self.is_restarting_starting():
             await self._started_event.wait()
+
+            return Skip()
+
+        return Success()
+
+    async def skip_if_stopped_or_wait_if_stopping(self, ctx):
+        if self.is_stopped():
+            return Skip()
+
+        if self.is_stopping() or self.is_restarting_stopping():
+            await self._shutdown_event.wait()
 
             return Skip()
 

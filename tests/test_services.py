@@ -388,3 +388,45 @@ async def test_start_idempotency(mock_schedule_background_tasks):
     result = await service.start.run(task_group=tg)
     assert result.is_success
     assert started_counter == 1
+
+
+@pytest.mark.anyio
+async def test_stop_idempotency(mock_schedule_background_tasks):
+    stopped_counter = 0
+
+    def stopped_callback():
+        nonlocal stopped_counter
+        stopped_counter += 1
+
+    continue_event = anyio.create_event()
+
+    async def wait_for_continue():
+        await continue_event.wait()
+
+    shutdown_event_mock = Mock(spec_set=anyio.Event)
+    service = Service()
+    service.on_enter_stopping(wait_for_continue)
+    service.on_enter_stopped(stopped_callback)
+    service._shutdown_event = shutdown_event_mock
+    service.schedule_background_tasks = mock_schedule_background_tasks
+
+    result = None
+
+    async def stop_while_in_progress():
+        nonlocal result
+        result = await service.stop.run()
+        await continue_event.set()
+
+    async with anyio.create_task_group() as tg:
+        await service.start(task_group=tg)
+        await tg.spawn(service.stop.run)
+        await anyio.sleep(0.1)
+        await tg.spawn(stop_while_in_progress)
+
+    shutdown_event_mock.wait.assert_awaited_once_with()
+    assert result.is_success
+    assert stopped_counter == 1
+
+    result = await service.stop.run()
+    assert result.is_success
+    assert stopped_counter == 1
